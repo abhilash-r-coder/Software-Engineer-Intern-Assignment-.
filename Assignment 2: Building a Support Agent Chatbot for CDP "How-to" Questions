@@ -1,0 +1,33 @@
+from flask import Flask, request, jsonify
+from elasticsearch import Elasticsearch
+import requests
+from bs4 import BeautifulSoup
+
+app = Flask(__name__)
+es = Elasticsearch("http://localhost:9200")
+
+CDP_DOCS = {
+    "segment": "https://segment.com/docs/?ref=nav",
+    "mparticle": "https://docs.mparticle.com/",
+    "lytics": "https://docs.lytics.com/",
+    "zeotap": "https://docs.zeotap.com/home/en-us/"
+}
+
+def scrape_and_index():
+    for cdp, url in CDP_DOCS.items():
+        response = requests.get(url)
+        soup = BeautifulSoup(response.text, "html.parser")
+        text = ' '.join([p.text for p in soup.find_all("p")])
+        es.index(index="cdp_docs", body={"cdp": cdp, "content": text})
+
+@app.route("/query", methods=["POST"])
+def query_chatbot():
+    user_query = request.json.get("question")
+    es_query = {"query": {"match": {"content": user_query}}}
+    response = es.search(index="cdp_docs", body=es_query)
+    answers = [hit["_source"] for hit in response["hits"]["hits"]]
+    return jsonify({"answers": answers})
+
+if __name__ == "__main__":
+    scrape_and_index()
+    app.run(debug=True)
